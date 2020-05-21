@@ -1,0 +1,479 @@
+---
+title: "House_Prices"
+author: "Don Padmaperuma"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library('ggplot2')
+library('ggthemes') 
+library('scales')
+library('dplyr') 
+library('mice')
+library('randomForest') 
+library('data.table')
+library('gridExtra')
+library('corrplot') 
+library('GGally')
+library('e1071')
+library(caret)
+```
+
+## Acquire Data
+
+```{r}
+train <-read.csv('train.csv', stringsAsFactors = F)
+test  <-read.csv('test.csv', stringsAsFactors = F)
+```
+
+## Explore Data
+
+```{r}
+dim(train)
+```
+```{r}
+str(train)
+```
+```{r}
+dim(test)
+```
+
+```{r}
+str(test)
+```
+
+```{r}
+#Count the number of columns that consists of text data
+
+sum(sapply(train[,1:81], typeof) == "character")
+```
+
+```{r}
+#Count the number of columns that consists of numerical data
+
+sum(sapply(train[,1:81], typeof) == "integer")
+```
+```{r}
+# Obtain summary statistics
+
+summary(train[,sapply(train[,1:81], typeof) == "integer"])
+```
+```{r}
+# The percentage of data missing in train
+
+sum(is.na(train)) / (nrow(train) *ncol(train))
+```
+```{r}
+# The percentage of data missing in test
+
+sum(is.na(test)) / (nrow(test) * ncol(test))
+```
+
+```{r}
+# Check for duplicated rows
+
+cat("The number of duplicated rows are", nrow(train) - nrow(unique(train)))
+```
+
+## Combine data
+Since test dataset has no “Saleprice” variable. We will create it and then combine.
+
+```{r}
+test$SalePrice<-rep(NA,1459)
+house<-bind_rows(train,test)
+
+## Data Exploration
+
+str(house)
+```
+## Data Visualization
+
+```{r}
+cat_var <- names(train)[which(sapply(train, is.character))]
+cat_car <- c(cat_var, 'BedroomAbvGr', 'HalfBath', ' KitchenAbvGr','BsmtFullBath', 'BsmtHalfBath', 'MSSubClass')
+numeric_var <- names(train)[which(sapply(train, is.numeric))]
+## Creating one training dataset with categorical variable and one with numeric variable. We will use this for data visualization.
+
+train1_cat<-train[cat_var]
+train1_num<-train[numeric_var]
+```
+
+### Bar plot/Density plot function
+```{r}
+## Bar plot function 
+
+plotHist <- function(data_in, i) 
+{
+  data <- data.frame(x=data_in[[i]])
+  p <- ggplot(data=data, aes(x=factor(x))) + stat_count() + xlab(colnames(data_in)[i]) + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1))
+  return (p)
+}
+## Density plot function
+
+plotDen <- function(data_in, i){
+  data <- data.frame(x=data_in[[i]], SalePrice = data_in$SalePrice)
+  p <- ggplot(data= data) + geom_line(aes(x = x), stat = 'density', size = 1,alpha = 1.0) +
+    xlab(paste0((colnames(data_in)[i]), '\n', 'Skewness: ',round(skewness(data_in[[i]], na.rm = TRUE), 2))) + theme_light() 
+  return(p)
+}
+```
+
+### Function to call both Bar plot and Density plot function
+```{r}
+doPlots <- function(data_in, fun, ii, ncol=3) 
+{
+  pp <- list()
+  for (i in ii) {
+    p <- fun(data_in=data_in, i=i)
+    pp <- c(pp, list(p))
+  }
+  do.call("grid.arrange", c(pp, ncol=ncol))
+}
+
+
+## Barplots for the categorical features
+
+doPlots(train1_cat, fun = plotHist, ii = 1:4, ncol = 2)
+```
+
+### Box Plot
+```{r}
+ggplot(train, aes(x = Neighborhood, y = SalePrice)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=80), 
+             colour='red', linetype='dashed', lwd=2) +
+  scale_y_continuous(labels=dollar_format()) +
+  theme_few()
+```
+## Missing Value 
+```{r}
+# Looking at the distribution and summary of the target variable
+
+summary(train$SalePrice)
+```
+```{r}
+quantile(train$SalePrice)
+```
+
+```{r}
+## Histogram for target variable
+
+hist(train$SalePrice)
+```
+
+```{r}
+# Plotting 'GrLivArea' too see if there are any outliers
+
+ggplot(train,aes(y=SalePrice,x=GrLivArea))+geom_point()
+```
+
+```{r}
+summary(train$GrLivArea)
+```
+```{r}
+# There are outliers in 'GrLivArea' field. Let's remove those outliers.
+
+train <- train[train$GrLivArea<=4000,]
+```
+
+```{r}
+## To find number of missing value for all variable in train dataset
+
+colSums(sapply(train, is.na))
+```
+```{r}
+## To find number of missing value for all variable in combined dataset (Train+Test)
+
+sapply(house[,1:80], function(x) sum(is.na(x)))
+```
+
+```{r}
+## Taking all the missing data indices in one variables
+
+Missing_indices <- sapply(train,function(x) sum(is.na(x)))
+Missing_Summary <- data.frame(index = names(train),Missing_Values=Missing_indices)
+Missing_Summary[Missing_Summary$Missing_Values > 0,]
+```
+
+```{r}
+## Combining train and test data for quicker data prep
+test$SalePrice <- NA
+train$isTrain <- 1
+test$isTrain <- 0
+house <- rbind(train,test)
+```
+
+```{r}
+house$MasVnrArea[which(is.na(house$MasVnrArea))] <- mean(house$MasVnrArea,na.rm=T)
+```
+
+### Changing all the NA in variables to None 
+```{r}
+house$Alley1 <- as.character(house$Alley)
+house$Alley1[which(is.na(house$Alley))] <- "None"
+table(house$Alley1)
+```
+```{r}
+house$Alley <- as.factor(house$Alley1)
+house <- subset(house,select = -Alley1)
+```
+
+```{r}
+house$MasVnrType1 <- as.character(house$MasVnrType)
+house$MasVnrType1[which(is.na(house$MasVnrType))] <- "None"
+house$MasVnrType <- as.factor(house$MasVnrType1)
+house <- subset(house,select = -MasVnrType1)
+table(house$MasVnrType)
+```
+```{r}
+house$LotFrontage[which(is.na(house$LotFrontage))] <- median(house$LotFrontage,na.rm = T)
+```
+
+```{r}
+house$FireplaceQu1 <- as.character(house$FireplaceQu)
+house$FireplaceQu1[which(is.na(house$FireplaceQu))] <- "None"
+house$FireplaceQu <- as.factor(house$FireplaceQu1)
+house <- subset(house,select = -FireplaceQu1)
+```
+
+```{r}
+house$PoolQC1 <- as.character(house$PoolQC)
+house$PoolQC1[which(is.na(house$PoolQC))] <- "None"
+house$PoolQC <- as.factor(house$PoolQC1)
+house <- subset(house,select = -PoolQC1)
+```
+
+```{r}
+house$Fence1 <- as.character(house$Fence)
+house$Fence1[which(is.na(house$Fence))] <- "None"
+house$Fence <- as.factor(house$Fence1)
+house <- subset(house,select = -Fence1)
+```
+
+```{r}
+house$MiscFeature1 <- as.character(house$MiscFeature)
+house$MiscFeature1[which(is.na(house$MiscFeature))] <- "None"
+house$MiscFeature <- as.factor(house$MiscFeature1)
+house <- subset(house,select = -MiscFeature1)
+```
+
+```{r}
+house$GarageType1 <- as.character(house$GarageType)
+house$GarageType1[which(is.na(house$GarageType))] <- "None"
+house$GarageType <- as.factor(house$GarageType1)
+house <- subset(house,select = -GarageType1)
+```
+
+```{r}
+house$GarageYrBlt[which(is.na(house$GarageYrBlt))] <- 0
+```
+
+```{r}
+house$GarageFinish1 <- as.character(house$GarageFinish)
+house$GarageFinish1[which(is.na(house$GarageFinish))] <- "None"
+house$GarageFinish <- as.factor(house$GarageFinish1)
+house <- subset(house,select = -GarageFinish1)
+
+```
+
+```{r}
+house$GarageQual1 <- as.character(house$GarageQual)
+house$GarageQual1[which(is.na(house$GarageQual))] <- "None"
+house$GarageQual <- as.factor(house$GarageQual1)
+house <- subset(house,select = -GarageQual1)
+```
+
+```{r}
+house$GarageCond1 <- as.character(house$GarageCond)
+house$GarageCond1[which(is.na(house$GarageCond))] <- "None"
+house$GarageCond <- as.factor(house$GarageCond1)
+house <- subset(house,select = -GarageCond1)
+```
+
+```{r}
+house$BsmtQual1 <- as.character(house$BsmtQual)
+house$BsmtQual1[which(is.na(house$BsmtQual))] <- "None"
+house$BsmtQual <- as.factor(house$BsmtQual1)
+house <- subset(house,select = -BsmtQual1)
+```
+
+```{r}
+house$BsmtCond1 <- as.character(house$BsmtCond)
+house$BsmtCond1[which(is.na(house$BsmtCond))] <- "None"
+house$BsmtCond <- as.factor(house$BsmtCond1)
+house <- subset(house,select = -BsmtCond1)
+
+```
+
+```{r}
+
+house$BsmtExposure1 <- as.character(house$BsmtExposure)
+house$BsmtExposure1[which(is.na(house$BsmtExposure))] <- "None"
+house$BsmtExposure <- as.factor(house$BsmtExposure1)
+house <- subset(house,select = -BsmtExposure1)
+```
+
+```{r}
+house$BsmtFinType11 <- as.character(house$BsmtFinType1)
+house$BsmtFinType11[which(is.na(house$BsmtFinType1))] <- "None"
+house$BsmtFinType1 <- as.factor(house$BsmtFinType11)
+house <- subset(house,select = -BsmtFinType11)
+```
+
+```{r}
+house$BsmtFinType21 <- as.character(house$BsmtFinType2)
+house$BsmtFinType21[which(is.na(house$BsmtFinType2))] <- "None"
+house$BsmtFinType2 <- as.factor(house$BsmtFinType21)
+house <- subset(house,select = -BsmtFinType21)
+```
+
+```{r}
+house$Electrical1 <- as.character(house$Electrical)
+house$Electrical1[which(is.na(house$Electrical))] <- "None"
+house$Electrical <- as.factor(house$Electrical1)
+house <- subset(house,select = -Electrical1)
+```
+
+### Factorizing
+```{r}
+house$MSZoning<- factor(house$MSZoning)
+house$Street <- factor(house$Street)
+house$LotShape <-factor(house$LotShape )
+house$LandContour<-factor(house$LandContour)
+house$Utilities<-factor(house$Utilities)
+house$LotConfig<-factor(house$LotConfig)
+house$LandSlope<-factor(house$LandSlope)
+house$Neighborhood<-factor(house$Neighborhood)
+house$Condition1<-factor(house$Condition1)
+house$Condition2<-factor(house$Condition2)
+house$BldgType<-factor(house$BldgType)
+house$HouseStyle<-factor(house$HouseStyle)
+house$RoofStyle<-factor(house$RoofStyle)
+house$RoofMatl<-factor(house$RoofMatl)
+house$Exterior1st<-factor(house$Exterior1st)
+house$Exterior2nd<-factor(house$Exterior2nd)
+house$ExterQual<-factor(house$ExterQual)
+house$ExterCond<-factor(house$ExterCond)
+house$Foundation<-factor(house$Foundation)
+house$Heating<-factor(house$Heating)
+house$HeatingQC<-factor(house$HeatingQC)
+house$CentralAir<-factor(house$CentralAir)
+house$KitchenQual<-factor(house$KitchenQual)
+house$Functional<-factor(house$Functional)
+house$PavedDrive<-factor(house$PavedDrive)
+house$SaleType<-factor(house$SaleType)
+house$SaleCondition<-factor(house$SaleCondition)
+str(house)
+```
+### Taking all the column classes in one variable so as to seperate factors from numerical variables.
+
+```{r}
+Column_classes <- sapply(names(house),function(x){class(house[[x]])})
+numeric_columns <-names(Column_classes[Column_classes != "factor"])
+
+#determining skew of each numeric variable
+
+skew <- sapply(numeric_columns,function(x){skewness(house[[x]],na.rm = T)})
+
+# Let us determine a threshold skewness and transform all variables above the treshold.
+
+skew <- skew[skew > 0.75]
+
+# transform excessively skewed features with log(x + 1)
+
+for(x in names(skew)) 
+{
+  house[[x]] <- log(house[[x]] + 1)
+}
+```
+
+### Train and test dataset creation
+
+```{r}
+train <- house[house$isTrain==1,]
+test <- house[house$isTrain==0,]
+smp_size <- floor(0.75 * nrow(train))
+
+## setting the seed to make the partition reproducible
+
+set.seed(123)
+train_ind <- sample(seq_len(nrow(train)), size = smp_size)
+
+train_new <- train[train_ind, ]
+validate <- train[-train_ind, ]
+train_new <- subset(train_new,select=-c(Id,isTrain))
+validate <- subset(validate,select=-c(Id,isTrain))
+nrow(train_new)
+```
+
+
+### Build the model 
+
+```{r}
+library(randomForest)
+house_model <- randomForest(SalePrice~.,
+                            data = train_new)
+```
+
+### Get importance
+```{r}
+importance    <- importance(house_model)
+varImpPlot(house_model)
+```
+
+```{r}
+# Predict using the test set
+
+prediction <- predict(house_model,test)
+
+# Evaluation RMSE function
+
+RMSE <- function(x,y){
+  a <- sqrt(sum((log(x)-log(y))^2)/length(y))
+  return(a)
+}
+```
+
+```{r}
+RMSE1 <- RMSE(prediction, validate$SalePrice)
+RMSE1
+```
+
+```{r}
+prediction[which(is.na(prediction))] <- mean(prediction,na.rm=T)
+submit <- data.frame(Id=test$Id,SalePrice=prediction)
+write.csv(submit,file="my_submission.csv",row.names=F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
