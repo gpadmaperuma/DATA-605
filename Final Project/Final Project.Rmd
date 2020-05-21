@@ -1,0 +1,343 @@
+---
+title: "DATA 605 - Final Project"
+author: "Don Padmaperuma"
+output: 
+  html_document:
+    toc: True
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(kableExtra)
+```
+
+
+## Problem 1  
+Using R, generate a random variable X that has 10,000 random uniform numbers from 1 to N, where N can be any number of your choosing greater than or equal to 6.  Then generate a random variable Y that has 10,000 random normal numbers with a mean of (N+1)/2.  
+
+```{r}
+set.seed(123)
+N <- 10
+X <-  runif(10000, min=0, max=N)
+Y <- rnorm(10000, mean=(N+1)/2, sd=(N+1)/2)# mean and standard deviation is (N+1)/2
+df <- data.frame(cbind(X, Y))
+summary(X)
+hist(X)
+```
+```{r}
+summary(Y)
+hist(Y)
+```
+### Probability
+Calculate as a minimum the below probabilities a through c.  Assume the small letter "x" is estimated as the median of the X variable, and the small letter "y" is estimated as the 1st quartile of the Y variable.  Interpret the meaning of all probabilities.  
+
+	
+```{r}
+#set variables
+#median of the X variable
+x<-median(X)
+x
+```
+
+```{r}
+y <- quantile(Y, 0.25)
+y
+```
+
+
+#### a.   P(X>x | X>y)  
+```{r}
+pXXy <- nrow(subset(df, X > x & Y > y))/10000
+pXy <- nrow(subset(df, X > y))/10000
+Prob_a <- (pXXy/pXy)
+Prob_a
+```
+#### b.  P(X>x, Y>y)  
+```{r}
+Prob_b <- nrow(subset(df, X > x & Y > y))/10000
+Prob_b
+```
+
+#### c.  P(X<x | X>y)  
+```{r}
+pXXy2 <- nrow(subset(df, X < x & X > y))/10000
+pXy2<- nrow(subset(df, X > y))/10000
+Prob_c<-pXXy2/pXy2
+Prob_c
+```
+
+### Investigate
+Investigate whether P(X>x and Y>y)=P(X>x)P(Y>y) by building a table and evaluating the marginal and joint probabilities.  
+
+```{r}
+matrix<-matrix( c(sum(X>x & Y<y),sum(X>x & Y>y), sum(X<x & Y<y),sum(X<x & Y>y)), nrow = 2,ncol = 2)
+matrix<-cbind(matrix,c(matrix[1,1]+matrix[1,2],matrix[2,1]+matrix[2,2]))
+matrix<-rbind(matrix,c(matrix[1,1]+matrix[2,1],matrix[1,2]+matrix[2,2],matrix[1,3]+matrix[2,3]))
+contingency<-as.data.frame(matrix)
+names(contingency) <- c("X>x","X<x", "Total")
+row.names(contingency) <- c("Y<y","Y>y", "Total")
+kable(contingency) %>%
+  kable_styling(bootstrap_options = "bordered")
+```
+
+```{r}
+prob_matrix<-matrix/matrix[3,3]
+contingency_p<-as.data.frame(prob_matrix)
+names(contingency_p) <- c("X>x","X<x", "Total")
+row.names(contingency_p) <- c("Y<y","Y>y", "Total")
+kable(round(contingency_p,2)) %>%
+  kable_styling(bootstrap_options = "bordered")
+```
+Compute  P(X>x)P(Y>y)
+```{r}
+prob_matrix[3,1]*prob_matrix[2,3]
+```
+Compute P(X>x and Y>y)  
+```{r}
+round(prob_matrix[2,1],digits = 3)
+```
+Since the values are so similar/close we would conclude that X and Y are indeed independent.
+
+
+### Fisher’s Exact Test and the Chi Square Test
+Check to see if independence holds by using Fisher’s Exact Test and the Chi Square Test.  What is the difference between the two? Which is most appropriate?   
+
+#### Fisher's Exact Test  
+```{r}
+fisher.test(matrix,simulate.p.value=TRUE)
+```
+#### Chi Square Test  
+```{r}
+chisq.test(matrix, correct = TRUE)
+```
+P values obtained from both test seems to greater than 0.05 making null hypothesis H0 acceptable.  
+
+Fisher's exact test is practically applied only in analysis of small samples but actually it is valid for all sample sizes. While the chi-squared test relies on an approximation, Fisher's exact test is one of exact tests. 
+
+As Fisher's exact test is used in analysis of small samples, chi-squared test is appropriate in this case.   
+
+## Problem 2  
+The House Prices: Advanced Regression Techniques competition.  https://www.kaggle.com/c/house-prices-advanced-regression-techniques.  
+
+```{r}
+# Import training data
+train <- read.csv('https://raw.githubusercontent.com/gpadmaperuma/DATA-605/master/Final%20Project/train.csv')
+test <- read.csv('https://raw.githubusercontent.com/gpadmaperuma/DATA-605/master/Final%20Project/test.csv')
+test$SalePrice <- 0
+```
+
+### Descriptive and Inferential Statistics  
+
+#### Summary of Training data
+
+```{r}
+summary(train)
+```
+
+```{r}
+summary(test)
+```
+#### Univariate descriptive statistics  
+Provide univariate descriptive statistics and appropriate plots for the training data set  
+```{r}
+#Summary
+summary(train$SalePrice)
+```
+```{r}
+#Histogram
+hist(train$SalePrice, main="Sale Price")
+```
+```{r}
+# QQ Plot
+qqnorm(train$SalePrice)
+qqline(train$SalePrice)
+```
+
+#### Scatter plots
+rovide a scatterplot matrix for at least two of the independent variables and the dependent variable  
+
+```{r}
+#ScatterPlot
+pairs(~SalePrice+LotArea+GrLivArea++GarageArea,data=train, main="Scatterplot Matrix")
+```
+#### Correlation Matrix  
+Derive a correlation matrix for any three quantitative variables in the dataset.  Test the hypotheses that the correlations between each pairwise set of variables is 0 and provide an 80% confidence interval.  Discuss the meaning of your analysis.  Would you be worried about familywise error? Why or why not?  
+
+```{r}
+#Subsetting data
+sub_df <- data.frame(train$LotArea,train$GrLivArea,train$GarageArea)
+#Correlation
+cormatrix <- cor(sub_df)
+cormatrix
+```
+```{r}
+library(corrplot)
+corrplot(cormatrix, method="square")
+```
+#### Hypothesis Test  
+```{r}
+#GrLivArea & LotArea
+cor.test(train$LotArea,train$GrLivArea,method = "pearson",conf.level = 0.80)
+```
+```{r}
+#GarageArea & LotArea
+cor.test(train$LotArea,train$GarageArea,method = "pearson",conf.level = 0.80)
+```
+```{r}
+#GarageArea & GrLivArea
+cor.test(train$GarageArea,train$GrLivArea,method = "pearson",conf.level = 0.80)
+```
+With all three p-values at less than 0.05, we can reject the null hypothesis. We are confident that the correlation between the three variables are not zeroes. It is safe to say that we are 80% confident that the correlation between GrLivArea & LotArea is between 0.2315997 & 0.2940809, GarageArea & LotArea is between 0.1477356 & 0.2126767 and GarageArea & GrLivArea is between 0.1477356 & 0.2126767.   
+
+### Linear Algebra and Correlation  
+Invert your correlation matrix from above. (This is known as the precision matrix and contains variance inflation factors on the diagonal.) Multiply the correlation matrix by the precision matrix, and then multiply the precision matrix by the correlation matrix. Conduct LU decomposition on the matrix.   
+
+#### Invert your correlation matrix from above.  
+```{r}
+precision_matrix<-solve(cormatrix)
+round(precision_matrix,4)
+```
+#### Multiply the matrix
+```{r}
+#Correlation matrix by Precision matrix
+corr_by_prec <- cormatrix%*%precision_matrix
+round(corr_by_prec, 4)
+```
+```{r}
+#precision matrix by the correlation matrix
+prec_by_corr <- precision_matrix%*%cormatrix
+round(prec_by_corr, 4)
+```
+#### Conduct LU Decomposition  
+```{r}
+library(matrixcalc)
+lu.decomposition(precision_matrix)
+```
+### Calculus-Based Probability & Statistics  
+Select a variable in the Kaggle.com training dataset that is skewed to the right, shift it so that the minimum value is absolutely above zero if necessary.  Then load the MASS package and run fitdistr to fit an exponential probability density function.  
+
+```{r}
+mass_fit <- train$TotalBsmtSF
+min(mass_fit)
+```
+
+
+#### Fit an exponential probability density function  
+
+```{r}
+library(MASS)
+```
+
+```{r}
+fit <- fitdistr(mass_fit, "exponential")
+fit
+```
+
+Find the optimal value of $\lambda$ for this distribution, and then take 1000 samples from this exponential distribution using this value (e.g., rexp(1000,$\lambda$)).    
+
+```{r}
+lambda<-fit$estimate
+sim<- rexp(1000,lambda)
+lambda
+```
+#### plot and compare  
+
+```{r}
+hist(sim,breaks = 100)
+```
+
+```{r}
+hist(mass_fit, breaks = 100)
+```
+
+```{r}
+library(ggplot2)
+sim.df <- data.frame(length = sim)
+mass_fit.df <- data.frame(length = mass_fit)
+
+sim.df$from <- 'sim'
+mass_fit.df$from <- 'Mass_Fit'
+
+both.df <- rbind(sim.df,mass_fit.df)
+
+ggplot(both.df, aes(length, fill = from)) + geom_density(alpha = 0.2)
+```
+#### cumulative distribution function (CDF)  
+
+Using the exponential pdf, find the 5th and 95th percentiles using the cumulative distribution function (CDF).   
+
+```{r}
+quantile(sim, probs=c(0.05, 0.95))  
+```
+Also generate a 95% confidence interval from the empirical data, assuming normality.  
+
+```{r}
+mean(mass_fit)
+```
+```{r}
+normal<-rnorm(length(mass_fit),mean(mass_fit),sd(mass_fit))
+hist(normal)
+```
+provide the empirical 5th percentile and 95th percentile of the data. 
+```{r}
+quantile(normal, probs=c(0.05, 0.95))
+```
+```{r}
+normal.df <- data.frame(length = normal)
+
+normal.df$from <- 'normal'
+
+all.df <- rbind(both.df,normal.df)
+
+ggplot(all.df, aes(length, fill = from)) + geom_density(alpha = 0.2)
+```
+
+  
+## Kaggle Submission
+
+Link to my rpub of House Prices(https://rpubs.com/gpadmaperuma/617543)  
+
+Username: gpadmaperuma
+Display Name: Geeth
+Email: gpadmaperuma@gmail.com 
+Score: 9.45360
+
+![](https://github.com/gpadmaperuma/DATA-605/blob/master/Final%20Project/Kaggle_leaderboard.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
